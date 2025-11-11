@@ -70,20 +70,19 @@ def load_artifacts():
 
 def create_feature_vector(input_data, feature_columns):
     """Create feature vector matching training data structure"""
-    # Create a dataframe with all feature columns initialized to 0
-    feature_df = pd.DataFrame(0, index=[0], columns=feature_columns)
-    
-    # Map input data to feature columns
-    for key, value in input_data.items():
-        if key in feature_df.columns:
-            feature_df[key] = value
-        else:
-            # Handle one-hot encoded columns
-            for col in feature_df.columns:
-                if str(key) in col:
-                    feature_df[col] = value
-    
-    return feature_df
+    try:
+        # Create a dataframe with all feature columns initialized to 0
+        feature_df = pd.DataFrame(0, index=[0], columns=feature_columns)
+        
+        # Map input data to feature columns
+        for key, value in input_data.items():
+            if key in feature_df.columns:
+                feature_df[key] = value
+        
+        return feature_df
+    except Exception as e:
+        st.error(f"Error creating feature vector: {e}")
+        return None
 
 def predict_heart_attack(model, scaler, feature_columns, patient_data):
     """Make prediction for a single patient"""
@@ -91,6 +90,9 @@ def predict_heart_attack(model, scaler, feature_columns, patient_data):
         # Create feature vector
         feature_vector = create_feature_vector(patient_data, feature_columns)
         
+        if feature_vector is None:
+            return None, None
+            
         # Scale features
         scaled_features = scaler.transform(feature_vector)
         
@@ -103,6 +105,18 @@ def predict_heart_attack(model, scaler, feature_columns, patient_data):
         st.error(f"Prediction error: {e}")
         return None, None
 
+def get_available_features(feature_columns):
+    """Extract available feature names for debugging"""
+    bp_features = [col for col in feature_columns if 'blood pressure' in col.lower() or 'bp' in col.lower() or 'systolic' in col.lower() or 'diastolic' in col.lower()]
+    numerical_features = [col for col in feature_columns if col.replace('.', '').isdigit() or any(x in col.lower() for x in ['age', 'cholesterol', 'bmi', 'screen', 'sleep', 'rate'])]
+    categorical_features = [col for col in feature_columns if col not in numerical_features and col not in bp_features]
+    
+    return {
+        'bp_features': bp_features,
+        'numerical_features': numerical_features[:10],  # First 10 only
+        'categorical_features': categorical_features[:10]  # First 10 only
+    }
+
 def main():
     # Header
     st.markdown('<h1 class="main-header">❤️ Heart Attack Risk Predictor</h1>', unsafe_allow_html=True)
@@ -114,6 +128,13 @@ def main():
     if model is None:
         st.error("Please make sure all model files (heart_attack_model.h5, scaler.pkl, feature_columns.pkl) are in the same directory as this app.")
         return
+    
+    # Debug: Show available features (optional - you can remove this section)
+    with st.expander("🔧 Debug: Available Features"):
+        available_features = get_available_features(feature_columns)
+        st.write("Blood Pressure Features:", available_features['bp_features'])
+        st.write("Numerical Features:", available_features['numerical_features'])
+        st.write("Categorical Features:", available_features['categorical_features'])
     
     # Create two columns for layout
     col1, col2 = st.columns([1, 1])
@@ -143,12 +164,18 @@ def main():
             diabetes = st.selectbox("Diabetes", ["No", "Yes"])
             hypertension = st.selectbox("Hypertension", ["No", "Yes"])
             
-            # Clinical Measurements
+            # Clinical Measurements - FIXED: Separate systolic and diastolic
             st.subheader("Clinical Measurements")
             cholesterol = st.slider("Cholesterol Levels (mg/dL)", 100, 300, 200)
             bmi = st.slider("BMI (kg/m²)", 15.0, 40.0, 25.0)
-            systolic_bp = st.slider("Systolic Blood Pressure (mmHg)", 90, 180, 120)
-            diastolic_bp = st.slider("Diastolic Blood Pressure (mmHg)", 60, 120, 80)
+            
+            # Blood pressure as separate numerical values
+            col_bp1, col_bp2 = st.columns(2)
+            with col_bp1:
+                systolic_bp = st.slider("Systolic BP (mmHg)", 90, 180, 120)
+            with col_bp2:
+                diastolic_bp = st.slider("Diastolic BP (mmHg)", 60, 120, 80)
+            
             resting_hr = st.slider("Resting Heart Rate (bpm)", 60, 120, 72)
             
             # Region and SES
@@ -163,30 +190,72 @@ def main():
         
         if submitted:
             with st.spinner("Analyzing patient data..."):
-                # Prepare input data
+                # Prepare input data - FIXED VERSION
                 input_data = {
-                    'Age': age,
+                    'Age': float(age),
                     f'Gender_{gender}': 1,
                     f'Smoking Status_{smoking}': 1,
                     f'Alcohol Consumption_{alcohol}': 1,
                     f'Physical Activity Level_{physical_activity}': 1,
-                    'Screen Time (hrs/day)': screen_time,
-                    'Sleep Duration (hrs/day)': sleep_duration,
+                    'Screen Time (hrs/day)': float(screen_time),
+                    'Sleep Duration (hrs/day)': float(sleep_duration),
                     f'Diet Type_{diet_type}': 1,
                     f'Stress Level_{stress_level}': 1,
                     f'Family History of Heart Disease_{family_history}': 1,
                     f'Diabetes_{diabetes}': 1,
                     f'Hypertension_{hypertension}': 1,
-                    'Cholesterol Levels (mg/dL)': cholesterol,
-                    'BMI (kg/m²)': bmi,
+                    'Cholesterol Levels (mg/dL)': float(cholesterol),
+                    'BMI (kg/m²)': float(bmi),
                     f'Region_{region}': 1,
                     f'Urban/Rural_{urban_rural}': 1,
-                    f'SES_{ses}': 1
+                    f'SES_{ses}': 1,
+                    'Resting Heart Rate (bpm)': float(resting_hr)
                 }
                 
-                # Add blood pressure (handle based on your actual feature names)
-                input_data['Blood Pressure (systolic/diastolic mmHg)'] = f"{systolic_bp}/{diastolic_bp}"
-                input_data['Resting Heart Rate (bpm)'] = resting_hr
+                # Handle blood pressure based on actual feature names in your model
+                # Try different possible feature names for blood pressure
+                bp_features_found = False
+                
+                # Option 1: If your model has separate systolic/diastolic features
+                if 'Blood Pressure (systolic/diastolic mmHg)_systolic' in feature_columns:
+                    input_data['Blood Pressure (systolic/diastolic mmHg)_systolic'] = float(systolic_bp)
+                    bp_features_found = True
+                
+                if 'Blood Pressure (systolic/diastolic mmHg)_diastolic' in feature_columns:
+                    input_data['Blood Pressure (systolic/diastolic mmHg)_diastolic'] = float(diastolic_bp)
+                    bp_features_found = True
+                
+                # Option 2: If your model has combined BP feature (we'll skip it since it causes errors)
+                # Option 3: If your model has different BP feature names
+                bp_possible_names = [
+                    'Systolic_BP', 'Diastolic_BP',
+                    'Blood Pressure_systolic', 'Blood Pressure_diastolic',
+                    'BP_Systolic', 'BP_Diastolic'
+                ]
+                
+                for bp_name in bp_possible_names:
+                    if bp_name in feature_columns:
+                        if 'systolic' in bp_name.lower() or 'systolic' in bp_name:
+                            input_data[bp_name] = float(systolic_bp)
+                            bp_features_found = True
+                        elif 'diastolic' in bp_name.lower() or 'diastolic' in bp_name:
+                            input_data[bp_name] = float(diastolic_bp)
+                            bp_features_found = True
+                
+                # If no BP features found, show warning but continue
+                if not bp_features_found:
+                    st.warning("⚠️ Blood pressure features not found in model. Using default values.")
+                    # Add default BP values if features exist but with different names
+                    for col in feature_columns:
+                        if 'systolic' in col.lower():
+                            input_data[col] = 120.0  # default
+                        elif 'diastolic' in col.lower():
+                            input_data[col] = 80.0   # default
+                
+                # Debug: Show what data we're sending (optional)
+                with st.expander("🔍 Debug: Input Data Sent"):
+                    st.write("Numerical values:", {k: v for k, v in input_data.items() if isinstance(v, (int, float))})
+                    st.write("Categorical values:", {k: v for k, v in input_data.items() if not isinstance(v, (int, float))})
                 
                 # Make prediction
                 probability, feature_vector = predict_heart_attack(model, scaler, feature_columns, input_data)
@@ -260,12 +329,14 @@ def main():
                         protective_factors.append("• High Physical Activity")
                     if smoking == "Never":
                         protective_factors.append("• Non-smoker")
-                    if diet_type == "Vegetarian":
-                        protective_factors.append("• Vegetarian Diet")
+                    if diet_type == "Vegetarian" or diet_type == "Vegan":
+                        protective_factors.append("• Plant-based Diet")
                     if stress_level == "Low":
                         protective_factors.append("• Low Stress Level")
                     if bmi < 25:
                         protective_factors.append("• Healthy BMI")
+                    if cholesterol < 200:
+                        protective_factors.append("• Healthy Cholesterol")
                     
                     for factor in protective_factors:
                         st.success(factor)
