@@ -375,3 +375,20 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# In the patient_data dictionary, replace BP section with:
+patient_data = {
+    # ... other features ...
+    
+    # Try ALL possible BP feature names
+    'Blood Pressure (systolic/diastolic mmHg)_systolic': systolic_bp,
+    'Blood Pressure (systolic/diastolic mmHg)_diastolic': diastolic_bp,
+    'Systolic_BP': systolic_bp,
+    'Diastolic_BP': diastolic_bp, 
+    'Blood Pressure_systolic': systolic_bp,
+    'Blood Pressure_diastolic': diastolic_bp,
+    'systolic': systolic_bp,
+    'diastolic': diastolic_bp,
+    
+    # ... rest of features ...
+}
